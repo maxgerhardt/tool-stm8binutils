@@ -282,11 +282,25 @@ jobs:
           # under TARGET_OS_MAC, which Apple's headers define, and that macro
           # then mangles the SDK's own fdopen declaration. macOS ships libz in
           # /usr/lib, so use it and skip the 1990s copy entirely.
+          # Intel homebrew installs into /usr/local, which clang searches by
+          # default, so configure silently picks up whatever optional libraries
+          # happen to be preinstalled on the runner - gettext, xz and mpfr were
+          # linked in as homebrew dylibs no user would have. Apple Silicon
+          # homebrew lives in /opt/homebrew and is not default-searched, so the
+          # two architectures produced different binaries.
+          #
+          # Pin the feature set instead of reacting to the runner image. None of
+          # the three matter for an stm8 cross debugger: mpfr only affects target
+          # float printing precision, lzma only minidebuginfo, nls only message
+          # translations.
           ./configure \
             --build=${{ matrix.host }} \
             --host=${{ matrix.host }} \
             --prefix="$PREFIX" \
             --with-system-zlib \
+            --without-mpfr \
+            --without-lzma \
+            --disable-nls \
             $COMMON_CONFIGURE_FLAGS
 
       - name: Build
@@ -474,6 +488,12 @@ jobs:
             ./installed/bin/stm8-gdb --version
             ./installed/bin/stm8-as --version
             ./ci/check_standalone.sh ./installed/bin/stm8-gdb
+
+      # arm-runner-action copies artifacts out of the image with `sudo cp -Rp`,
+      # so the tree lands owned by root and every later step fails to write to
+      # it. Hand it back to the runner user.
+      - name: Take ownership of the copied install tree
+        run: sudo chown -R "$(id -u):$(id -g)" installed
 
       - name: Write package.json
         run: ./ci/make_package_json.sh linux_armv6l installed
