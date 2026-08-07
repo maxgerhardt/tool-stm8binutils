@@ -228,7 +228,10 @@ jobs:
           # Apple clang 15+ rejects the implicit declarations and implicit ints
           # that this 2018 C code is full of.
           export CFLAGS="-std=gnu17 -g -O2 -Wno-implicit-function-declaration -Wno-implicit-int -Wno-int-conversion -Wno-error"
-          export CXXFLAGS="-std=gnu++14 -g -O2 -Wno-error"
+          # -Wenum-constexpr-conversion is an error by default in clang 15+, not
+          # a warning, so --disable-werror cannot reach it. gdb's enum_flags
+          # casts -1 to an enum type all over, which the diagnostic rejects.
+          export CXXFLAGS="-std=gnu++14 -g -O2 -Wno-error -Wno-enum-constexpr-conversion"
           # macOS "system readline" is libedit, which gdb cannot use, so point at
           # the keg-only homebrew readline instead.
           export CPPFLAGS="-I${BREW}/opt/readline/include -I${BREW}/opt/expat/include"
