@@ -13,7 +13,8 @@ each rewritten from scratch by every build:
 |---|---|---|
 | `linux_x64` | `linux_x86_64` | ubuntu-22.04, native |
 | `linux_aarch64` | `linux_aarch64` | ubuntu-22.04-arm, native |
-| `linux_armv7l` | `linux_armv7l` | debian:11 container, cross-compiled armhf |
+| `linux_armv7l` | `linux_armv7l`, `linux_armv8l` | debian:11 container, cross-compiled armhf |
+| `linux_armv8l` | `linux_armv7l`, `linux_armv8l` | same tree as `linux_armv7l` |
 | `linux_armv6l` | `linux_armv6l` | Raspberry Pi OS bullseye, emulated |
 | `windows_x64` | `windows_amd64` | MSYS2 MINGW64, statically linked |
 | `mac_arm64` | `darwin_arm64` | macos-14, native |
@@ -68,6 +69,7 @@ What remains, and all a user needs:
 | `linux_x86_64` | glibc 2.34+ — Ubuntu 22.04+, Debian 12+, RHEL 9+ |
 | `linux_aarch64` | glibc 2.34+ |
 | `linux_armv7l` | glibc 2.29+ — Raspberry Pi OS buster and later |
+| `linux_armv8l` | as `linux_armv7l`; same binaries |
 | `linux_armv6l` | glibc 2.31+ — Raspberry Pi OS bullseye and later |
 | `windows_amd64` | nothing; fully static, no MSYS2 DLLs |
 | `darwin_arm64` | macOS 11.0+; only `/usr/lib` and system frameworks |

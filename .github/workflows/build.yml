@@ -419,8 +419,14 @@ jobs:
           objdump -T ./installed/bin/stm8-gdb \
             | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
 
+      # armv8l is not a separate ABI - it is what uname reports for 32-bit arm
+      # userspace under a 64-bit kernel, which is the default on a Pi 4/5
+      # running 32-bit Raspberry Pi OS. The userspace is still armhf/EABI5, so
+      # these very binaries run there; PlatformIO just needs to be told, since
+      # it builds its system string straight from platform.machine() and has no
+      # rule folding armv8l into armv7l.
       - name: Write package.json
-        run: ./ci/make_package_json.sh linux_armv7l installed
+        run: ./ci/make_package_json.sh linux_armv7l,linux_armv8l installed
 
       - uses: actions/upload-artifact@v4
         with:
@@ -433,8 +439,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_MESSAGE: >-
             binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
-            for linux_armv7l (${{ github.sha }})
+            for linux_armv7l and linux_armv8l (${{ github.sha }})
         run: ./ci/publish_branch.sh linux_armv7l installed
+
+      # Same tree under the armv8l name too, so the per-platform branch naming
+      # stays consistent and a direct branch reference works either way.
+      - name: Publish to linux_armv8l branch
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MESSAGE: >-
+            binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
+            for linux_armv7l and linux_armv8l (${{ github.sha }})
+        run: ./ci/publish_branch.sh linux_armv8l installed
 
   linux-armv6l:
     name: Linux armv6l

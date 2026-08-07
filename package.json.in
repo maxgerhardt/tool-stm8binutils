@@ -15,7 +15,7 @@
   "homepage": "https://stm8-binutils-gdb.sourceforge.io/",
   "license": "GPL-3.0-or-later",
   "system": [
-    "@SYSTEM@"
+@SYSTEMS@
   ],
   "repository": {
     "type": "git",
