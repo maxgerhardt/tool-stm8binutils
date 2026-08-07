@@ -1,0 +1,44 @@
+#!/bin/sh
+# Fails the build if a shipped binary depends on anything a user is not
+# guaranteed to already have.
+#
+# The whole point of staging static archives is that the only runtime
+# dependency left is the system C library. This asserts that stayed true, so a
+# dependency creeping back in breaks CI instead of breaking users.
+set -e
+
+BIN="$1"
+if [ -z "$BIN" ]; then
+  echo "usage: $0 <binary>" >&2
+  exit 1
+fi
+
+echo "==> Runtime dependencies of ${BIN}"
+status=0
+
+case "$(uname -s)" in
+  Darwin)
+    otool -L "$BIN"
+    # Only the OS-provided frameworks and libSystem are acceptable. Anything
+    # under /opt/homebrew or /usr/local came from the build machine.
+    offenders=$(otool -L "$BIN" | tail -n +2 | awk '{print $1}' \
+      | grep -v '^/usr/lib/' | grep -v '^/System/Library/' || true)
+    ;;
+  *)
+    ldd "$BIN"
+    # glibc's own pieces, and nothing else.
+    offenders=$(ldd "$BIN" | awk '{print $1}' \
+      | grep -Ev '^(linux-vdso\.so\.1|libm\.so\.6|libc\.so\.6|libdl\.so\.2|libpthread\.so\.0|librt\.so\.1|libgcc_s\.so\.1|/lib64/ld-linux-x86-64\.so\.2)$' || true)
+    ;;
+esac
+
+if [ -n "$offenders" ]; then
+  echo ""
+  echo "ERROR: ${BIN} depends on libraries users are not guaranteed to have:" >&2
+  echo "$offenders" | sed 's/^/  /' >&2
+  status=1
+else
+  echo "OK: only system libraries required"
+fi
+
+exit $status

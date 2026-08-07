@@ -40,16 +40,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential texinfo bison flex file patch curl xz-utils \
-            libreadline-dev libexpat1-dev zlib1g-dev libncurses-dev
+            libreadline-dev libexpat1-dev zlib1g-dev libncurses-dev liblzma-dev
 
       - name: Download and patch sources
         run: ./ci/fetch_sources.sh
 
+      - name: Stage static dependency archives
+        env:
+          SEARCH_DIRS: /usr/lib/x86_64-linux-gnu /usr/lib
+        run: |
+          ./ci/stage_static_libs.sh "$(pwd)/staticlibs" \
+            readline history ncursesw tinfo expat lzma z
+
       - name: Configure
         run: |
           PREFIX="$(pwd)/installed"
+          STATICLIBS="$(pwd)/staticlibs"
           cd "binutils-${BINUTILS_VERSION}"
-          ./configure --prefix="$PREFIX" $COMMON_CONFIGURE_FLAGS
+          # staticlibs holds only .a archives, and comes first in the library
+          # search path, so -lreadline and friends resolve to the archives and
+          # get linked into the binary. glibc is not in there and stays dynamic.
+          ./configure --prefix="$PREFIX" $COMMON_CONFIGURE_FLAGS \
+            LDFLAGS="-L${STATICLIBS}"
 
       - name: Build
         run: make -C "binutils-${BINUTILS_VERSION}" -j"$(nproc)"
@@ -65,8 +77,7 @@ jobs:
           ./installed/bin/stm8-gdb --version
           ./installed/bin/stm8-as --version
           ./installed/bin/stm8-ld --version
-          echo "--- stm8-gdb dynamic dependencies ---"
-          ldd ./installed/bin/stm8-gdb
+          ./ci/check_standalone.sh ./installed/bin/stm8-gdb
           echo "--- highest glibc symbol version required ---"
           objdump -T ./installed/bin/stm8-gdb \
             | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
@@ -183,9 +194,18 @@ jobs:
       - name: Prepare sources for Apple Silicon
         run: ./ci/macos_prep.sh
 
+      - name: Stage static dependency archives
+        run: |
+          BREW="$(brew --prefix)"
+          export SEARCH_DIRS="${BREW}/opt/readline/lib ${BREW}/opt/expat/lib ${BREW}/lib"
+          # ncurses is not staged: macOS always ships libncurses in /usr/lib, so
+          # linking it dynamically costs the user nothing.
+          ./ci/stage_static_libs.sh "$(pwd)/staticlibs" readline history expat
+
       - name: Configure
         run: |
           PREFIX="$(pwd)/installed"
+          STATICLIBS="$(pwd)/staticlibs"
           BREW="$(brew --prefix)"
           # Apple clang 15+ rejects the implicit declarations and implicit ints
           # that this 2018 C code is full of.
@@ -194,7 +214,10 @@ jobs:
           # macOS "system readline" is libedit, which gdb cannot use, so point at
           # the keg-only homebrew readline instead.
           export CPPFLAGS="-I${BREW}/opt/readline/include -I${BREW}/opt/expat/include"
-          export LDFLAGS="-L${BREW}/opt/readline/lib -L${BREW}/opt/expat/lib"
+          # staticlibs holds only .a archives and comes first, so readline and
+          # expat get linked in rather than leaving the binary pointing at
+          # homebrew dylibs that a user's Mac will not have.
+          export LDFLAGS="-L${STATICLIBS}"
           export PATH="${BREW}/opt/texinfo/bin:$PATH"
           cd "binutils-${BINUTILS_VERSION}"
           ./configure \
@@ -221,8 +244,7 @@ jobs:
           ./installed/bin/stm8-ld --version
           echo "--- architecture ---"
           file ./installed/bin/stm8-gdb
-          echo "--- stm8-gdb dynamic dependencies ---"
-          otool -L ./installed/bin/stm8-gdb
+          ./ci/check_standalone.sh ./installed/bin/stm8-gdb
           echo "--- signature ---"
           codesign -dv ./installed/bin/stm8-gdb
 

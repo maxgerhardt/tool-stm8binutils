@@ -39,6 +39,26 @@ bundled readline copy. `--without-python` keeps `libpython` off the binaries;
 linking it dynamically is what produced the `Could not find platform independent
 libraries` failures users hit with earlier builds.
 
+## Standalone binaries
+
+The binaries are meant to run on a stock machine with nothing installed
+alongside them. `ci/stage_static_libs.sh` collects the static archives of
+readline, ncurses, expat, lzma and zlib into one directory that is placed first
+in the library search path, so `-lreadline` and friends resolve to `.a` archives
+and are linked into the executable. The C library is deliberately left dynamic.
+
+What remains, and all a user needs:
+
+| Platform | Runtime requirement |
+|---|---|
+| Linux | glibc 2.34 or newer — Ubuntu 22.04+, Debian 12+, RHEL 9+ |
+| Windows | nothing; fully static, no MSYS2 DLLs |
+| macOS | the OS itself; only `/usr/lib` and system frameworks |
+
+`ci/check_standalone.sh` enforces this in CI. It inspects the linked binary and
+fails the build if any dependency outside that allowlist appears, so a
+regression breaks the build rather than reaching users.
+
 Every produced executable is stripped. On macOS stripping invalidates the ad-hoc
 code signature that arm64 Mach-O binaries carry, so `ci/strip_tree.sh` re-signs
 each one afterwards — without that step the binaries are SIGKILLed on launch.
