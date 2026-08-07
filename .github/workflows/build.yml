@@ -116,12 +116,21 @@ jobs:
         run: |
           PREFIX="$(pwd)/installed"
           cd "binutils-${BINUTILS_VERSION}"
+          # MSYS2 ships GCC 16, which defaults to C23 - and in C23 an empty
+          # parameter list means "no parameters" rather than "unprototyped".
+          # The bundled gettext declares `char *getcwd();` the old way, so it
+          # collides with mingw's real prototype. Pin the standards these 2018
+          # sources were written against. C++17 likewise removed constructs gdb
+          # 8.1 still uses.
+          #
           # -static so the result has no dependency on the MSYS2 runtime DLLs.
           ./configure \
             --build=x86_64-w64-mingw32 \
             --host=x86_64-w64-mingw32 \
             --prefix="$PREFIX" \
             $COMMON_CONFIGURE_FLAGS \
+            CFLAGS="-std=gnu17 -g -O2" \
+            CXXFLAGS="-std=gnu++14 -g -O2" \
             LDFLAGS=-static
 
       - name: Build
@@ -180,8 +189,8 @@ jobs:
           BREW="$(brew --prefix)"
           # Apple clang 15+ rejects the implicit declarations and implicit ints
           # that this 2018 C code is full of.
-          export CFLAGS="-Wno-implicit-function-declaration -Wno-implicit-int -Wno-int-conversion -Wno-error"
-          export CXXFLAGS="-Wno-error"
+          export CFLAGS="-std=gnu17 -g -O2 -Wno-implicit-function-declaration -Wno-implicit-int -Wno-int-conversion -Wno-error"
+          export CXXFLAGS="-std=gnu++14 -g -O2 -Wno-error"
           # macOS "system readline" is libedit, which gdb cannot use, so point at
           # the keg-only homebrew readline instead.
           export CPPFLAGS="-I${BREW}/opt/readline/include -I${BREW}/opt/expat/include"
