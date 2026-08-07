@@ -8,6 +8,12 @@ on:
 permissions:
   contents: write
 
+# A newer push supersedes whatever is still running; there is no value in
+# finishing a build whose output is already stale.
+concurrency:
+  group: build
+  cancel-in-progress: true
+
 env:
   BINUTILS_VERSION: "2.30"
   GDB_VERSION: "8.1"
@@ -49,8 +55,11 @@ jobs:
         env:
           SEARCH_DIRS: /usr/lib/x86_64-linux-gnu /usr/lib
         run: |
+          # Both ncurses and ncursesw are staged: gdb's link line asks for
+          # -lncurses, and leaving that one out let libncurses.so back in and
+          # dragged libtinfo.so along behind it.
           ./ci/stage_static_libs.sh "$(pwd)/staticlibs" \
-            readline history ncursesw tinfo expat lzma z
+            readline history ncurses ncursesw tinfo expat lzma z
 
       - name: Configure
         run: |
@@ -134,14 +143,19 @@ jobs:
           # sources were written against. C++17 likewise removed constructs gdb
           # 8.1 still uses.
           #
+          # NCURSES_STATIC/READLINE_STATIC switch those headers out of their
+          # default __declspec(dllimport) mode. Without them the TUI code links
+          # against __imp_endwin, __imp_stdscr and friends, which do not exist
+          # in a static build.
+          #
           # -static so the result has no dependency on the MSYS2 runtime DLLs.
           ./configure \
             --build=x86_64-w64-mingw32 \
             --host=x86_64-w64-mingw32 \
             --prefix="$PREFIX" \
             $COMMON_CONFIGURE_FLAGS \
-            CFLAGS="-std=gnu17 -g -O2" \
-            CXXFLAGS="-std=gnu++14 -g -O2" \
+            CFLAGS="-std=gnu17 -g -O2 -DNCURSES_STATIC -DREADLINE_STATIC" \
+            CXXFLAGS="-std=gnu++14 -g -O2 -DNCURSES_STATIC -DREADLINE_STATIC" \
             LDFLAGS=-static
 
       - name: Build

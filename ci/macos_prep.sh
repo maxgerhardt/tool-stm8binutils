@@ -30,3 +30,15 @@ find "$SRCDIR" -name config.guess -exec cp "${WORK}/config.guess.new" {} \; -exe
 
 echo "==> Host now detected as: $(sh "${SRCDIR}/config.guess")"
 echo "==> Target still resolves: $(sh "${SRCDIR}/config.sub" stm8-none-elf32)"
+
+# gdb compiles with -I../intl, and macOS filesystems are case-insensitive, so
+# libc++'s `#include <version>` resolves to intl/VERSION - a text file reading
+# "GNU gettext library from gettext-0.12.1". The compiler then tries to parse
+# that as C++ ("unknown type name 'GNU'"), and because <new> includes <version>
+# the whole C++ standard library falls over behind it.
+#
+# The file is purely informational; intl/Makefile.in never references it.
+if [ -f "${SRCDIR}/intl/VERSION" ]; then
+  echo "==> Removing intl/VERSION (shadows libc++ <version> on case-insensitive filesystems)"
+  rm -f "${SRCDIR}/intl/VERSION"
+fi
