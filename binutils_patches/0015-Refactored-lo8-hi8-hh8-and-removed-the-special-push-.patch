@@ -1,0 +1,232 @@
+From 166b8be056093ad4de48ca2e4ae9bd6bd442bd6e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=85ke=20Rehnman?= <ake_rehnman_at_gmail_com>
+Date: Sun, 22 Mar 2020 10:41:03 +0100
+Subject: [PATCH 15/18] Refactored lo8/hi8/hh8 and removed the special push
+ insns.
+
+---
+ gas/config/tc-stm8.c  | 65 ++++++++++++++++++++-----------------------
+ include/opcode/stm8.h |  5 +---
+ opcodes/stm8-dis.c    | 27 ------------------
+ opcodes/stm8-opc.c    |  6 ----
+ 4 files changed, 31 insertions(+), 72 deletions(-)
+
+diff --git a/gas/config/tc-stm8.c b/gas/config/tc-stm8.c
+index b8f62454b3..e90e997d9e 100644
+--- a/gas/config/tc-stm8.c
++++ b/gas/config/tc-stm8.c
+@@ -270,8 +270,6 @@ extract_word (char *from, char *to, int limit)
+ void
+ md_operand (expressionS * exp __attribute__((unused)))
+ {
+-  /* In case of a syntax error, escape back to try next syntax combo.  */
+-  as_bad(_("stm8: call to md_operand"));
+ }
+ 
+ void print_fixup (fixS *);
+@@ -285,8 +283,8 @@ md_apply_fix (fixS *fixP, valueT *valP, segT segment ATTRIBUTE_UNUSED)
+   long val = * (long *) valP;
+   char *buf = fixP->fx_where + fixP->fx_frag->fr_literal;
+ 
+-	if (stm8_debug)
+-  	print_fixup(fixP);
++  if (stm8_debug)
++	print_fixup(fixP);
+ 
+   switch (fixP->fx_r_type)
+     {
+@@ -370,16 +368,22 @@ md_apply_fix (fixS *fixP, valueT *valP, segT segment ATTRIBUTE_UNUSED)
+         fixP->fx_done = 1;
+         break;
+ 
+-	case BFD_RELOC_STM8_LO8:
+-		*buf = 0xff & val;
++    case BFD_RELOC_STM8_LO8:
++		fixP->fx_no_overflow = 1;
++		if (!fixP->fx_addsy)
++			*buf = 0xff & val;
+ 		break;
+ 
+-	case BFD_RELOC_STM8_HI8:
+-		*buf = (0xff00 & val) >> 8;
++    case BFD_RELOC_STM8_HI8:
++		fixP->fx_no_overflow = 1;
++		if (!fixP->fx_addsy)
++			*buf = (0xff00 & val) >> 8;
+ 		break;
+ 
+-	case BFD_RELOC_STM8_HH8:
+-		*buf = (0xff0000 & val) >> 16;
++    case BFD_RELOC_STM8_HH8:
++		fixP->fx_no_overflow = 1;
++		if (!fixP->fx_addsy)
++			*buf = (0xff0000 & val) >> 16;
+ 		break;
+ 
+     default:
+@@ -892,6 +896,13 @@ int read_arg(char *str, expressionS *exps)
+ 						input_line_pointer++;
+ 
+ 						exps->X_md = pexp->op;
++						
++						if (*input_line_pointer)
++						{
++							as_bad (_("garbage in operand '%s'"), input_line_pointer);
++							return 0;
++						}
++						
+ 						return 1;
+ 					}
+ 					else
+@@ -901,8 +912,6 @@ int read_arg(char *str, expressionS *exps)
+ 					}
+ 				}
+ 
+-				input_line_pointer = str;
+-
+ 				break;
+ 			}
+ 		}
+@@ -1019,7 +1028,14 @@ void stm8_bfd_out(struct stm8_opcodes_s op, expressionS exp[], int count, char *
+ 			case ST8_SHORTOFF_SP:
+ 			case ST8_BYTE:
+ 			case ST8_SHORTMEM:
+-				fix_new_exp(frag_now, where, 1, &exp[arg], FALSE, BFD_RELOC_8);
++				if (exp[arg].X_md == OP_LO8)
++					fix_new_exp(frag_now, where, 1, &exp[arg], FALSE, BFD_RELOC_STM8_LO8);
++				else if (exp[arg].X_md == OP_HI8)
++					fix_new_exp(frag_now, where, 1, &exp[arg], FALSE, BFD_RELOC_STM8_HI8);
++				else if (exp[arg].X_md == OP_HH8)
++					fix_new_exp(frag_now, where, 1, &exp[arg], FALSE, BFD_RELOC_STM8_HH8);
++				else
++					fix_new_exp(frag_now, where, 1, &exp[arg], FALSE, BFD_RELOC_8);
+ 				bfd_put_bits(0xaaaaaaaa, frag, 8, true);
+ 				frag+=1;
+ 				break;
+@@ -1038,21 +1054,6 @@ void stm8_bfd_out(struct stm8_opcodes_s op, expressionS exp[], int count, char *
+ 			case ST8_BIT_7:
+ 				fix_new_exp(frag_now, where-3, 1, &exp[arg], FALSE, BFD_RELOC_STM8_BIT_FLD);
+ 				break;
+-			case ST8_HI8:
+-				fix_new_exp(frag_now, where, 1, &exp[arg], FALSE, BFD_RELOC_STM8_HI8);
+-				bfd_put_bits(0xaaaaaaaa, frag, 8, true);
+-				frag+=1;
+-				break;
+-			case ST8_LO8:
+-				fix_new_exp(frag_now, where, 1, &exp[arg], FALSE, BFD_RELOC_STM8_LO8);
+-				bfd_put_bits(0xaaaaaaaa, frag, 8, true);
+-				frag+=1;
+-				break;
+-			case ST8_HH8:
+-				fix_new_exp(frag_now, where, 1, &exp[arg], FALSE, BFD_RELOC_STM8_HH8);
+-				bfd_put_bits(0xaaaaaaaa, frag, 8, true);
+-				frag+=1;
+-				break;
+ 			case ST8_END:
+ 				as_fatal(_("BUG: illigal op constraint"));
+ 				break;
+@@ -1180,15 +1181,9 @@ int cmpspec(stm8_addr_mode_t addr_mode[], expressionS exps[], int count)
+ 				continue;
+ 			break;
+ 		case OP_LO8:
+-			if (addr_mode[i] == ST8_LO8)
+-				continue;
+-			break;
+ 		case OP_HI8:
+-			if (addr_mode[i] == ST8_HI8)
+-				continue;
+-			break;
+ 		case OP_HH8:
+-			if (addr_mode[i] == ST8_HH8)
++			if (addr_mode[i] == ST8_BYTE)
+ 				continue;
+ 			break;
+ 		case OP_ILLEGAL:
+diff --git a/include/opcode/stm8.h b/include/opcode/stm8.h
+index 18eb88a7df..d131527d86 100644
+--- a/include/opcode/stm8.h
++++ b/include/opcode/stm8.h
+@@ -63,10 +63,7 @@ typedef enum {
+ 	ST8_LONGPTRW_Y,
+ 	ST8_LONGPTRE,
+ 	ST8_LONGPTRE_X,
+-	ST8_LONGPTRE_Y,
+-	ST8_HI8,
+-	ST8_LO8,
+-	ST8_HH8
++	ST8_LONGPTRE_Y
+ } stm8_addr_mode_t;
+ 
+ struct stm8_opcodes_s
+diff --git a/opcodes/stm8-dis.c b/opcodes/stm8-dis.c
+index e110f93c97..60f49b3e7f 100644
+--- a/opcodes/stm8-dis.c
++++ b/opcodes/stm8-dis.c
+@@ -332,33 +332,6 @@ int stm8_operands(char *s, unsigned char buf[], stm8_addr_mode_t arg)
+ 			sprintf(s,"(0x%6.6x,Y)",val);
+ 		return 3;
+ 		break;
+-	case ST8_HI8:
+-		val = buf[0];
+-		sym = find_symbol(val);
+-		if (sym)
+-			sprintf(s,"hi8(#%s)",sym);
+-		else
+-			sprintf(s,"hi8(#0x%2.2x)",val);
+-		return 2;
+-		break;
+-	case ST8_LO8:
+-		val = buf[0];
+-		sym = find_symbol(val);
+-		if (sym)
+-			sprintf(s,"lo8(#%s)",sym);
+-		else
+-			sprintf(s,"lo8(#0x%2.2x)",val);
+-		return 2;
+-		break;
+-	case ST8_HH8:
+-		val = buf[0];
+-		sym = find_symbol(val);
+-		if (sym)
+-			sprintf(s,"hh8(#%s)",sym);
+-		else
+-			sprintf(s,"hh8(#0x%4.4x)",val);
+-		return 3;
+-		break;
+ 	case ST8_END:
+ 		break;
+ 	}
+diff --git a/opcodes/stm8-opc.c b/opcodes/stm8-opc.c
+index 3eee930886..442efac331 100644
+--- a/opcodes/stm8-opc.c
++++ b/opcodes/stm8-opc.c
+@@ -496,9 +496,6 @@ const struct stm8_opcodes_s stm8_opcodes[] =
+ {"push", {ST8_REG_CC}, 0x8A},
+ {"push", {ST8_BYTE}, 0x4B},
+ {"push", {ST8_LONGMEM}, 0x3B},
+-{"push", {ST8_HI8}, 0x4B},
+-{"push", {ST8_LO8}, 0x4B},
+-{"push", {ST8_HH8}, 0x4B},
+ //pushw
+ {"pushw", {ST8_REG_X}, 0x89},
+ {"pushw", {ST8_REG_Y}, 0x9089},
+@@ -769,8 +766,6 @@ int stm8_compute_insn_size(struct stm8_opcodes_s opcode) {
+ 		case ST8_SHORTOFF_X:
+ 		case ST8_SHORTOFF_Y:
+ 		case ST8_SHORTOFF_SP:
+-		case ST8_LO8:
+-		case ST8_HI8:
+ 			ret++;
+ 			break;
+ 		case ST8_LONGPTRE_Y:
+@@ -788,7 +783,6 @@ int stm8_compute_insn_size(struct stm8_opcodes_s opcode) {
+ 		case ST8_EXTMEM:
+ 		case ST8_EXTOFF_X:
+ 		case ST8_EXTOFF_Y:
+-		case ST8_HH8:
+ 			ret += 3;
+ 			break;
+ 		case ST8_END:
+-- 
+2.30.2
+

@@ -1,0 +1,6 @@
+binutils-*/
+gdb-*/
+installed/
+*.tar.xz
+config.guess.new
+config.sub.new

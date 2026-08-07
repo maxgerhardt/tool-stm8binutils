@@ -1,0 +1,505 @@
+From 829ec037e9e4964789bf70ede0b09f0443eb30d3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=85ke=20Rehnman?= <ake_rehnman_at_gmail_com>
+Date: Mon, 16 Mar 2020 15:25:10 +0100
+Subject: [PATCH 13/18] Implemented .s short addressing mode modifer to index
+ and ptr operands
+
+---
+ bfd/bfd-in2.h        |  10 +-
+ gas/config/tc-stm8.c | 224 +++++++++++++++++++++++++++++++------------
+ opcodes/stm8-dis.c   |  18 ++--
+ 3 files changed, 180 insertions(+), 72 deletions(-)
+
+diff --git a/bfd/bfd-in2.h b/bfd/bfd-in2.h
+index e602ff2d7a..f836afd534 100644
+--- a/bfd/bfd-in2.h
++++ b/bfd/bfd-in2.h
+@@ -6517,13 +6517,15 @@ assembler and not (currently) written to any object files.  */
+ 
+ /* STM8 bit field immediate for BTJx, BCPL, BSET, BRES  instruction.  */
+   BFD_RELOC_STM8_BIT_FLD,
+-/* STM8 extract LSB from word. */
++
++/* STM8 extract LSB from word.  */
+   BFD_RELOC_STM8_LO8,
+-/* STM8 extract MSB from word. */
++
++/* STM8 extract MSB from word.  */
+   BFD_RELOC_STM8_HI8,
+-/* STM8 extract MMSB from 24-bit address. */
+-  BFD_RELOC_STM8_HH8,
+ 
++/* STM8 extract MMSB from 24-bit address.  */
++  BFD_RELOC_STM8_HH8,
+   BFD_RELOC_UNUSED };
+ 
+ typedef enum bfd_reloc_code_real bfd_reloc_code_real_type;
+diff --git a/gas/config/tc-stm8.c b/gas/config/tc-stm8.c
+index e670cb1da9..e339b5c5d2 100644
+--- a/gas/config/tc-stm8.c
++++ b/gas/config/tc-stm8.c
+@@ -35,15 +35,20 @@ typedef enum {
+ 	OP_MEM,
+ 	OP_INDX,
+ 	OP_INDY,
++	OP_SOFF_X,
+ 	OP_OFF_X,
++	OP_SOFF_Y,
+ 	OP_OFF_Y,
+-	OP_OFF_SP,
+-	OP_PTRW,
+-	OP_PTRE,
+-	OP_PTRW_X,
+-	OP_PTRW_Y,
+-	OP_PTRE_X,
+-	OP_PTRE_Y,
++	OP_SOFF_SP,
++	OP_SPTRW,
++	OP_LPTRW,
++	OP_LPTRE,
++	OP_SPTRW_X,
++	OP_LPTRW_X,
++	OP_SPTRW_Y,
++	OP_LPTRW_Y,
++	OP_LPTRE_X,
++	OP_LPTRE_Y,
+ 	OP_REGISTER,
+ 	OP_HI8,
+ 	OP_LO8,
+@@ -575,7 +580,13 @@ int read_arg_ptr(char *str, expressionS *exps)
+ 		s++;
+ 		input_line_pointer=s;
+ 
+-		/* first eat up .w and .e */
++		/* first eat up .s .w and .e */
++		if ((p = strstr(s,".s]")))
++		{
++			c = *p;
++			*p = 0;
++		}
++		else
+ 		if ((p = strstr(s,".w]")))
+ 		{
+ 			c = *p;
+@@ -602,6 +613,11 @@ int read_arg_ptr(char *str, expressionS *exps)
+ 			input_line_pointer+=1;
+ 			return 2;
+ 		} else
++		if ((*input_line_pointer == '.') && (*(input_line_pointer+1) == 's'))
++		{
++			input_line_pointer+=2;
++			return 1;
++		} else
+ 		if ((*input_line_pointer == '.') && (*(input_line_pointer+1) == 'w'))
+ 		{
+ 			input_line_pointer+=2;
+@@ -614,13 +630,57 @@ int read_arg_ptr(char *str, expressionS *exps)
+ 		}
+ 		else
+ 		{
+-			as_bad("Expected ']' or '.e' or '.w' but found '%c'",*input_line_pointer);
++			as_bad("Expected ']' or '.s' or '.w' or '.e' but found '%c'",*input_line_pointer);
+ 			return -1;
+ 		}
+ 	}
+ 	return 0;
+ }
+ 
++static
++int read_arg_idx(char *str, expressionS *exps)
++{
++	char *s;
++	char *p;
++	char c;
++
++	s = str;
++	input_line_pointer=s;
++
++	/* first eat up .s */
++	if ((p = strstr(s,".s")))
++	{
++		c = *p;
++		*p = 0;
++	}
++
++	expression(exps);
++	if (stm8_debug)
++		print_expr(exps);
++
++	/* restore c */
++	if (p)
++		*p = c;
++
++	//return default offset len
++	if (*input_line_pointer == ',')
++	{
++		input_line_pointer+=1;
++		return 2;
++	}
++	else if ((*input_line_pointer == '.') && (*(input_line_pointer+1) == 's'))
++	{
++		input_line_pointer+=2;
++		return 1;
++	}
++	else
++	{
++		as_bad("Expected ',' or '.s' but found '%c'",*input_line_pointer);
++		return -1;
++	}
++
++	return 0;
++}
+ 
+ char* toupperstr(char *str);
+ 
+@@ -633,6 +693,19 @@ char* toupperstr(char *str)
+ 	return str;
+ }
+ 
++char* strend( const char *str , const char *cmp);
++
++char* strend( const char *str , const char *cmp)
++{
++  str = strrchr(str, cmp[0]);
++
++  if( str != NULL )
++	if (!strcmp(str, cmp) )
++		return (char *)str;
++
++  return(0);
++}
++
+ //expressionS last_exp;
+ /* In: argument
+    Out: value
+@@ -668,14 +741,19 @@ int read_arg(char *str, expressionS *exps)
+ 		ret = read_arg_ptr(str, exps);
+ 		if (ret>0)
+ 		{
++			if (ret == 1)
++			{
++				exps->X_md=OP_SPTRW;
++				return 1;
++			}
+ 			if (ret == 2)
+ 			{
+-				exps->X_md=OP_PTRW;
++				exps->X_md=OP_LPTRW;
+ 				return 1;
+ 			}
+ 			if (ret == 3)
+ 			{
+-				exps->X_md=OP_PTRE;
++				exps->X_md=OP_LPTRE;
+ 				return 1;
+ 			}
+ 		}
+@@ -702,25 +780,37 @@ int read_arg(char *str, expressionS *exps)
+ 		if (str[0]=='[')
+ 		{
+ 			ret = read_arg_ptr(str, exps);
++			if (ret==1)
++			{
++				exps->X_md=OP_SPTRW_X;
++				return 1;
++			}
+ 			if (ret==2)
+ 			{
+-				exps->X_md=OP_PTRW_X;
++				exps->X_md=OP_LPTRW_X;
+ 				return 1;
+ 			}
+ 			if (ret==3)
+ 			{
+-				exps->X_md=OP_PTRE_X;
++				exps->X_md=OP_LPTRE_X;
+ 				return 1;
+ 			}
+-			return 0;
+ 		}
+-		str=strtok(str,",");
+-		input_line_pointer=str;
+-		expression(exps);
+-		if (stm8_debug)
+-			print_expr(exps);
+-		exps->X_md=OP_OFF_X;
+-		return 1;
++		else
++		{
++			ret = read_arg_idx(str, exps);
++			if (ret==1)
++			{
++				exps->X_md=OP_SOFF_X;
++				return 1;
++			}
++			if (ret==2)
++			{
++				exps->X_md=OP_OFF_X;
++				return 1;
++			}
++		}
++		return 0;
+ 	}
+ 	//offset,Y
+ 	else if ((str[0]=='(') && (strstr(strx,",Y)")))
+@@ -729,37 +819,49 @@ int read_arg(char *str, expressionS *exps)
+ 		if (str[0]=='[')
+ 		{
+ 			ret = read_arg_ptr(str, exps);
++			if (ret==1)
++			{
++				exps->X_md=OP_SPTRW_Y;
++				return 1;
++			}
+ 			if (ret==2)
+ 			{
+-				exps->X_md=OP_PTRW_Y;
++				exps->X_md=OP_LPTRW_Y;
+ 				return 1;
+ 			}
+ 			if (ret==3)
+ 			{
+-				exps->X_md=OP_PTRE_Y;
++				exps->X_md=OP_LPTRE_Y;
+ 				return 1;
+ 			}
+-			return 0;
+ 		}
+-		str=strtok(str,",");
+-		input_line_pointer=str;
+-		expression(exps);
+-		if (stm8_debug)
+-			print_expr(exps);
+-		exps->X_md=OP_OFF_Y;
+-		return 1;
++		else
++		{
++			ret = read_arg_idx(str, exps);
++			if (ret==1)
++			{
++				exps->X_md=OP_SOFF_Y;
++				return 1;
++			}
++			if (ret==2)
++			{
++				exps->X_md=OP_OFF_Y;
++				return 1;
++			}
++		}
++		return 0;
+ 	}
+ 	//offset,SP
+ 	else if ((str[0]=='(') && (strstr(strx,",SP)")))
+ 	{
+ 		str++;
+-		str=strtok(str,",");
+-		input_line_pointer=str;
+-		expression(exps);
+-		if (stm8_debug)
+-			print_expr(exps);
+-		exps->X_md=OP_OFF_SP;
+-		return 1;
++		ret = read_arg_idx(str, exps);
++		if (ret > 0)
++		{
++			exps->X_md=OP_SOFF_SP;
++			return 1;
++		}
++		return 0;
+ 	}
+ 	else
+ 	{
+@@ -776,7 +878,7 @@ int read_arg(char *str, expressionS *exps)
+ 			if (!result)
+ 			{
+ 				str += len;
+-				while (isspace(*str))
++				while (isspace((int)*str))
+ 					str++;
+ 
+ 				if (*str == '(')
+@@ -807,18 +909,14 @@ int read_arg(char *str, expressionS *exps)
+ 	}
+ 
+ 	char *p;
+-	char c;
+-	if ((p = strstr(str,".short")))
++	if ((p = strend(str, ".s")))
+ 	{
+-		c = *p;
+ 		*p = 0;
+ 		exps->X_md = OP_SHORTMEM;
+ 		input_line_pointer = str;
+ 		expression(exps);
+ 		if (stm8_debug)
+ 			print_expr(exps);
+-		*p = c;
+-		input_line_pointer += 6;
+ 		return 1;
+ 	}
+ 
+@@ -890,6 +988,8 @@ void stm8_bfd_out(struct stm8_opcodes_s op, expressionS exp[], int count, char *
+ 			case ST8_LONGPTRW_Y:
+ 			case ST8_LONGPTRW_X:
+ 			case ST8_LONGPTRW:
++			case ST8_LONGPTRE_Y:
++			case ST8_LONGPTRE_X:
+ 			case ST8_LONGPTRE:
+ 			case ST8_LONGOFF_Y:
+ 			case ST8_LONGOFF_X:
+@@ -979,6 +1079,10 @@ int cmpspec(stm8_addr_mode_t addr_mode[], expressionS exps[], int count)
+ 			if (addr_mode[i] == ST8_INDY)
+ 				continue;
+ 			break;
++		case OP_SOFF_X:
++			if (addr_mode[i] == ST8_SHORTOFF_X)
++				continue;
++			break;
+ 		case OP_OFF_X:
+ 			if (addr_mode[i] == ST8_SHORTOFF_X)
+ 				if (value < 0x100)
+@@ -988,6 +1092,10 @@ int cmpspec(stm8_addr_mode_t addr_mode[], expressionS exps[], int count)
+ 			if (addr_mode[i] == ST8_EXTOFF_X)
+ 				continue;
+ 			break;
++		case OP_SOFF_Y:
++			if (addr_mode[i] == ST8_SHORTOFF_Y)
++				continue;
++			break;
+ 		case OP_OFF_Y:
+ 			if (addr_mode[i] == ST8_SHORTOFF_Y)
+ 				if (value < 0x100)
+@@ -997,40 +1105,43 @@ int cmpspec(stm8_addr_mode_t addr_mode[], expressionS exps[], int count)
+ 			if (addr_mode[i] == ST8_EXTOFF_Y)
+ 				continue;
+ 			break;
+-		case OP_OFF_SP:
++		case OP_SOFF_SP:
+ 			if (addr_mode[i] == ST8_SHORTOFF_SP)
+ 				continue;
+ 			break;
+-		case OP_PTRW:
++		case OP_SPTRW:
+ 			if (addr_mode[i] == ST8_SHORTPTRW)
+-				if (value < 0x100)
+ 					continue;
++			break;
++		case OP_LPTRW:
+ 			if (addr_mode[i] == ST8_LONGPTRW)
+ 				continue;
+ 			break;
+-		case OP_PTRW_X:
++		case OP_SPTRW_X:
+ 			if (addr_mode[i] == ST8_SHORTPTRW_X)
+-				if (value < 0x100)
+ 					continue;
++			break;
++		case OP_LPTRW_X:
+ 			if (addr_mode[i] == ST8_LONGPTRW_X)
+ 					continue;
+ 			break;
+-		case OP_PTRW_Y:
++		case OP_SPTRW_Y:
+ 			if (addr_mode[i] == ST8_SHORTPTRW_Y)
+-				if (value < 0x100)
+ 					continue;
++			break;
++		case OP_LPTRW_Y:
+ 			if (addr_mode[i] == ST8_LONGPTRW_Y)
+ 					continue;
+ 			break;
+-		case OP_PTRE:
++		case OP_LPTRE:
+ 			if (addr_mode[i] == ST8_LONGPTRE)
+ 				continue;
+ 			break;
+-		case OP_PTRE_X:
++		case OP_LPTRE_X:
+ 			if (addr_mode[i] == ST8_LONGPTRE_X)
+ 				continue;
+ 			break;
+-		case OP_PTRE_Y:
++		case OP_LPTRE_Y:
+ 			if (addr_mode[i] == ST8_LONGPTRE_Y)
+ 				continue;
+ 			break;
+@@ -1063,11 +1174,6 @@ int cmpspec(stm8_addr_mode_t addr_mode[], expressionS exps[], int count)
+ 			return 1;
+ 		}
+ 
+-//		if (operand == ST8_DIRECT)
+-//		{
+-//			if (addr_mode[i] == ST8_SHORTMEM) continue;
+-//		}
+-
+ 		//not a match
+ 		ret++;
+ 	}
+diff --git a/opcodes/stm8-dis.c b/opcodes/stm8-dis.c
+index d1969f4434..e110f93c97 100644
+--- a/opcodes/stm8-dis.c
++++ b/opcodes/stm8-dis.c
+@@ -157,7 +157,7 @@ int stm8_operands(char *s, unsigned char buf[], stm8_addr_mode_t arg)
+ 		val = buf[0];
+ 		sym = find_symbol(val);
+ 		if (sym)
+-			sprintf(s,"%s",sym);
++			sprintf(s,"%s.s",sym);
+ 		else
+ 			sprintf(s,"0x%2.2x",val);
+ 		return 1;
+@@ -169,7 +169,7 @@ int stm8_operands(char *s, unsigned char buf[], stm8_addr_mode_t arg)
+ 		val = buf[0];
+ 		sym = find_symbol(val);
+ 		if (sym)
+-			sprintf(s,"(%s,X)",sym);
++			sprintf(s,"(%s.s,X)",sym);
+ 		else
+ 			sprintf(s,"(0x%2.2x,X)",val);
+ 		return 1;
+@@ -181,7 +181,7 @@ int stm8_operands(char *s, unsigned char buf[], stm8_addr_mode_t arg)
+ 		val = buf[0];
+ 		sym = find_symbol(val);
+ 		if (sym)
+-			sprintf(s,"(%s,Y)",sym);
++			sprintf(s,"(%s.s,Y)",sym);
+ 		else
+ 			sprintf(s,"(0x%2.2x,Y)",val);
+ 		return 1;
+@@ -199,27 +199,27 @@ int stm8_operands(char *s, unsigned char buf[], stm8_addr_mode_t arg)
+ 		val = buf[0];
+ 		sym = find_symbol(val);
+ 		if (sym)
+-			sprintf(s,"[%s.w]",sym);
++			sprintf(s,"[%s.s]",sym);
+ 		else
+-			sprintf(s,"[0x%2.2x.w]",val);
++			sprintf(s,"[0x%2.2x]",val);
+ 		return 1;
+ 		break;
+ 	case ST8_SHORTPTRW_X:
+ 		val = buf[0];
+ 		sym = find_symbol(val);
+ 		if (sym)
+-			sprintf(s,"([%s.w],X)",sym);
++			sprintf(s,"([%s.s],X)",sym);
+ 		else
+-			sprintf(s,"([0x%2.2x.w],X)",val);
++			sprintf(s,"([0x%2.2x],X)",val);
+ 		return 1;
+ 		break;
+ 	case ST8_SHORTPTRW_Y:
+ 		val = buf[0];
+ 		sym = find_symbol(val);
+ 		if (sym)
+-			sprintf(s,"([%s.w],Y)",sym);
++			sprintf(s,"([%s.s],Y)",sym);
+ 		else
+-			sprintf(s,"([0x%2.2x.w],Y)",val);
++			sprintf(s,"([0x%2.2x],Y)",val);
+ 		return 1;
+ 		break;
+ 	case ST8_LONGMEM:
+-- 
+2.30.2
+

@@ -1,0 +1,71 @@
+From abe33f58ca8772bdc5100587d33b3180e229a22b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=85ke=20Rehnman?= <ake_rehnman_at_gmail_com>
+Date: Mon, 16 Mar 2020 20:38:24 +0100
+Subject: [PATCH 14/18] Fixed bit operand relocation
+
+---
+ gas/config/tc-stm8.c | 26 ++++++++++++++++++++++++--
+ 1 file changed, 24 insertions(+), 2 deletions(-)
+
+diff --git a/gas/config/tc-stm8.c b/gas/config/tc-stm8.c
+index e339b5c5d2..b8f62454b3 100644
+--- a/gas/config/tc-stm8.c
++++ b/gas/config/tc-stm8.c
+@@ -978,6 +978,18 @@ void stm8_bfd_out(struct stm8_opcodes_s op, expressionS exp[], int count, char *
+ 		{
+ 			switch(op.constraints[arg])
+ 			{
++			case ST8_REG_CC:
++			case ST8_REG_A:
++			case ST8_REG_X:
++			case ST8_REG_Y:
++			case ST8_REG_SP:
++			case ST8_REG_XL:
++			case ST8_REG_XH:
++			case ST8_REG_YL:
++			case ST8_REG_YH:
++			case ST8_INDX:
++			case ST8_INDY:
++				break;
+ 			case ST8_EXTMEM:
+ 			case ST8_EXTOFF_X:
+ 			case ST8_EXTOFF_Y:
+@@ -1017,6 +1029,13 @@ void stm8_bfd_out(struct stm8_opcodes_s op, expressionS exp[], int count, char *
+ 				frag+=1;
+ 				break;
+ 			case ST8_BIT_0:
++			case ST8_BIT_1:
++			case ST8_BIT_2:
++			case ST8_BIT_3:
++			case ST8_BIT_4:
++			case ST8_BIT_5:
++			case ST8_BIT_6:
++			case ST8_BIT_7:
+ 				fix_new_exp(frag_now, where-3, 1, &exp[arg], FALSE, BFD_RELOC_STM8_BIT_FLD);
+ 				break;
+ 			case ST8_HI8:
+@@ -1034,7 +1053,8 @@ void stm8_bfd_out(struct stm8_opcodes_s op, expressionS exp[], int count, char *
+ 				bfd_put_bits(0xaaaaaaaa, frag, 8, true);
+ 				frag+=1;
+ 				break;
+-			default:
++			case ST8_END:
++				as_fatal(_("BUG: illigal op constraint"));
+ 				break;
+ 			}
+ 		}
+@@ -1068,8 +1088,10 @@ int cmpspec(stm8_addr_mode_t addr_mode[], expressionS exps[], int count)
+ 				continue;
+ 			if (addr_mode[i] == ST8_WORD)
+ 				continue;
++			/* for bit immidiate operand it is important to only match the opcode with
++			ST8_BIT_0 operand. We will later fix the insn bit value in BFD_RELOC_STM8_BIT_FLD */
+ 			if (addr_mode[i] == ST8_BIT_0)
+-					continue;
++				continue;
+ 			break;
+ 		case OP_INDX:
+ 			if (addr_mode[i] == ST8_INDX)
+-- 
+2.30.2
+

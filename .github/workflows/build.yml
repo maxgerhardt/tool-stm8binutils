@@ -1,0 +1,235 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BINUTILS_VERSION: "2.30"
+  GDB_VERSION: "8.1"
+  PKG_VERSION: "0.230.0"
+  # Shared across all three hosts.
+  #   --disable-readline --with-system-readline  works around a build failure in
+  #                                              the bundled readline copy
+  #   --without-python                           keeps libpython off the binary,
+  #                                              which is what produced the
+  #                                              "Could not find platform
+  #                                              independent libraries" reports
+  #   --disable-werror                           2018 sources vs modern compilers
+  COMMON_CONFIGURE_FLAGS: >-
+    --target=stm8-none-elf32
+    --program-prefix=stm8-
+    --disable-readline
+    --with-system-readline
+    --without-python
+    --disable-werror
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential texinfo bison flex file patch curl xz-utils \
+            libreadline-dev libexpat1-dev zlib1g-dev libncurses-dev
+
+      - name: Download and patch sources
+        run: ./ci/fetch_sources.sh
+
+      - name: Configure
+        run: |
+          PREFIX="$(pwd)/installed"
+          cd "binutils-${BINUTILS_VERSION}"
+          ./configure --prefix="$PREFIX" $COMMON_CONFIGURE_FLAGS
+
+      - name: Build
+        run: make -C "binutils-${BINUTILS_VERSION}" -j"$(nproc)"
+
+      - name: Install
+        run: make -C "binutils-${BINUTILS_VERSION}" install
+
+      - name: Strip binaries
+        run: ./ci/strip_tree.sh installed
+
+      - name: Smoke test
+        run: |
+          ./installed/bin/stm8-gdb --version
+          ./installed/bin/stm8-as --version
+          ./installed/bin/stm8-ld --version
+          echo "--- stm8-gdb dynamic dependencies ---"
+          ldd ./installed/bin/stm8-gdb
+          echo "--- highest glibc symbol version required ---"
+          objdump -T ./installed/bin/stm8-gdb \
+            | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+
+      - name: Write package.json
+        run: ./ci/make_package_json.sh linux_x86_64 installed
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tool-stm8binutils-linux_x86_64
+          path: installed/
+
+      - name: Publish to linux_x64 branch
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MESSAGE: >-
+            binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
+            for linux_x86_64 (${{ github.sha }})
+        run: ./ci/publish_branch.sh linux_x64 installed
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel git patch tar xz texinfo bison flex file diffutils
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-readline
+            mingw-w64-x86_64-expat
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-ncurses
+
+      - name: Download and patch sources
+        run: ./ci/fetch_sources.sh
+
+      - name: Configure
+        run: |
+          PREFIX="$(pwd)/installed"
+          cd "binutils-${BINUTILS_VERSION}"
+          # -static so the result has no dependency on the MSYS2 runtime DLLs.
+          ./configure \
+            --build=x86_64-w64-mingw32 \
+            --host=x86_64-w64-mingw32 \
+            --prefix="$PREFIX" \
+            $COMMON_CONFIGURE_FLAGS \
+            LDFLAGS=-static
+
+      - name: Build
+        run: make -C "binutils-${BINUTILS_VERSION}" -j"$(nproc)"
+
+      - name: Install
+        run: make -C "binutils-${BINUTILS_VERSION}" install
+
+      - name: Strip binaries
+        run: ./ci/strip_tree.sh installed
+
+      - name: Smoke test
+        run: |
+          ./installed/bin/stm8-gdb.exe --version
+          ./installed/bin/stm8-as.exe --version
+          ./installed/bin/stm8-ld.exe --version
+          echo "--- stm8-gdb.exe imports (should list no msys / mingw DLLs) ---"
+          ./installed/bin/stm8-objdump.exe -p ./installed/bin/stm8-gdb.exe \
+            | grep -i 'DLL Name' | sort -u
+
+      - name: Write package.json
+        run: ./ci/make_package_json.sh windows_amd64 installed
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tool-stm8binutils-windows_amd64
+          path: installed/
+
+      - name: Publish to windows_x64 branch
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MESSAGE: >-
+            binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
+            for windows_amd64 (${{ github.sha }})
+        run: ./ci/publish_branch.sh windows_x64 installed
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: brew install texinfo expat readline
+
+      - name: Download and patch sources
+        run: ./ci/fetch_sources.sh
+
+      - name: Prepare sources for Apple Silicon
+        run: ./ci/macos_prep.sh
+
+      - name: Configure
+        run: |
+          PREFIX="$(pwd)/installed"
+          BREW="$(brew --prefix)"
+          # Apple clang 15+ rejects the implicit declarations and implicit ints
+          # that this 2018 C code is full of.
+          export CFLAGS="-Wno-implicit-function-declaration -Wno-implicit-int -Wno-int-conversion -Wno-error"
+          export CXXFLAGS="-Wno-error"
+          # macOS "system readline" is libedit, which gdb cannot use, so point at
+          # the keg-only homebrew readline instead.
+          export CPPFLAGS="-I${BREW}/opt/readline/include -I${BREW}/opt/expat/include"
+          export LDFLAGS="-L${BREW}/opt/readline/lib -L${BREW}/opt/expat/lib"
+          export PATH="${BREW}/opt/texinfo/bin:$PATH"
+          cd "binutils-${BINUTILS_VERSION}"
+          ./configure \
+            --build=aarch64-apple-darwin \
+            --host=aarch64-apple-darwin \
+            --prefix="$PREFIX" \
+            $COMMON_CONFIGURE_FLAGS
+
+      - name: Build
+        run: |
+          export PATH="$(brew --prefix)/opt/texinfo/bin:$PATH"
+          make -C "binutils-${BINUTILS_VERSION}" -j"$(sysctl -n hw.ncpu)"
+
+      - name: Install
+        run: make -C "binutils-${BINUTILS_VERSION}" install
+
+      - name: Strip binaries
+        run: ./ci/strip_tree.sh installed
+
+      - name: Smoke test
+        run: |
+          ./installed/bin/stm8-gdb --version
+          ./installed/bin/stm8-as --version
+          ./installed/bin/stm8-ld --version
+          echo "--- architecture ---"
+          file ./installed/bin/stm8-gdb
+          echo "--- stm8-gdb dynamic dependencies ---"
+          otool -L ./installed/bin/stm8-gdb
+          echo "--- signature ---"
+          codesign -dv ./installed/bin/stm8-gdb
+
+      - name: Write package.json
+        run: ./ci/make_package_json.sh darwin_arm64 installed
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tool-stm8binutils-darwin_arm64
+          path: installed/
+
+      - name: Publish to mac_arm64 branch
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MESSAGE: >-
+            binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
+            for darwin_arm64 (${{ github.sha }})
+        run: ./ci/publish_branch.sh mac_arm64 installed

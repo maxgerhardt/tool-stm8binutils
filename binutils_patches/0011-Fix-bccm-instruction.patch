@@ -1,0 +1,35 @@
+From 1988980ef7321f00ff40520020d09a3d857b5314 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=85ke=20Rehnman?= <ake_rehnman_at_gmail_com>
+Date: Mon, 24 Feb 2020 00:08:24 +0100
+Subject: [PATCH 11/18] Fix bccm instruction
+
+https://sourceforge.net/p/stm8-binutils-gdb/tickets/7/
+
+Contributed by Piotr Wiszowaty <pwiszowaty@users.sourceforge.net>
+---
+ opcodes/stm8-opc.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/opcodes/stm8-opc.c b/opcodes/stm8-opc.c
+index 3a9397a152..3eee930886 100644
+--- a/opcodes/stm8-opc.c
++++ b/opcodes/stm8-opc.c
+@@ -84,7 +84,14 @@ const struct stm8_opcodes_s stm8_opcodes[] =
+ {"and", {ST8_REG_A, ST8_LONGPTRW_X}, 0x72D4},
+ {"and", {ST8_REG_A, ST8_SHORTPTRW_Y}, 0x91D4},
+ //bccm
+-//{"bccm", {ST8_LONGMEM, ST8_BYTE}, 0x90xx},
++{"bccm", {ST8_LONGMEM, ST8_BIT_0}, 0x9011},
++{"bccm", {ST8_LONGMEM, ST8_BIT_1}, 0x9013},
++{"bccm", {ST8_LONGMEM, ST8_BIT_2}, 0x9015},
++{"bccm", {ST8_LONGMEM, ST8_BIT_3}, 0x9017},
++{"bccm", {ST8_LONGMEM, ST8_BIT_4}, 0x9019},
++{"bccm", {ST8_LONGMEM, ST8_BIT_5}, 0x901b},
++{"bccm", {ST8_LONGMEM, ST8_BIT_6}, 0x901d},
++{"bccm", {ST8_LONGMEM, ST8_BIT_7}, 0x901f},
+ //bcp
+ {"bcp", {ST8_REG_A, ST8_BYTE}, 0xA5},
+ {"bcp", {ST8_REG_A, ST8_SHORTMEM}, 0xB5},
+-- 
+2.30.2
+

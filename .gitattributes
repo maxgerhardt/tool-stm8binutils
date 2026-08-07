@@ -1,0 +1,7 @@
+# Patches must reach patch(1) byte for byte - never touch their line endings.
+*.patch -text
+
+# The CI runs these through /bin/sh, so CRLF would break them.
+*.sh text eol=lf
+*.yml text eol=lf
+package.json.in text eol=lf

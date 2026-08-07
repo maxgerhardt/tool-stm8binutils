@@ -1,0 +1,31 @@
+From 2340fd67ef223eaf2e043c5b6f0e54fd82d57c54 Mon Sep 17 00:00:00 2001
+From: Antonio Borneo <borneo.antonio@gmail.com>
+Date: Fri, 2 Nov 2018 14:27:47 +0100
+Subject: [PATCH 12/18] Include stm8 while building multi architecture gdb
+
+GDB can be built for multi-architecture through the command
+	./configure --enable-targets=all && make
+but stm8 was not listed as one of the architectures.
+
+Add stm8-tdep.o to ALL_TARGET_OBS
+
+Signed-off-by: Antonio Borneo <borneo.antonio@gmail.com>
+---
+ gdb/Makefile.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/gdb/Makefile.in b/gdb/Makefile.in
+index 17b71c6e7c..15d908c7d9 100644
+--- a/gdb/Makefile.in
++++ b/gdb/Makefile.in
+@@ -774,6 +774,7 @@ ALL_TARGET_OBS = \
+ 	sparc-tdep.o \
+ 	spu-multiarch.o \
+ 	spu-tdep.o \
++	stm8-tdep.o \
+ 	symfile-mem.o \
+ 	tic6x-linux-tdep.o \
+ 	tic6x-tdep.o \
+-- 
+2.30.2
+

@@ -1,0 +1,79 @@
+From 1fbb1a60200495bf7836cef151d4aafe583d0278 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=85ke=20Rehnman?= <ake_rehnman_at_gmail_com>
+Date: Sun, 18 Jul 2021 09:16:53 +0200
+Subject: [PATCH 18/18] Python 3.9 segementation fault
+
+https://sourceforge.net/p/stm8-binutils-gdb/discussion/general/thread/6ebc1ee6a7/#1468
+https://bugzilla.redhat.com/show_bug.cgi?id=1829702
+https://sourceware.org/pipermail/gdb-patches/2020-May/169110.html
+---
+ gdb/python/python.c | 32 ++++++++++++++++++++++++++++++--
+ 1 file changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/gdb/python/python.c b/gdb/python/python.c
+index 0111a3f844..4ef7e89d81 100644
+--- a/gdb/python/python.c
++++ b/gdb/python/python.c
+@@ -242,6 +242,30 @@ gdbpy_enter::~gdbpy_enter ()
+   restore_active_ext_lang (m_previous_active);
+ }
+ 
++/* A helper class to save and restore the GIL, but without touching
++   the other globals that are handled by gdbpy_enter.  */
++
++class gdbpy_gil
++{
++public:
++
++  gdbpy_gil ()
++    : m_state (PyGILState_Ensure ())
++  {
++  }
++
++  ~gdbpy_gil ()
++  {
++    PyGILState_Release (m_state);
++  }
++
++  DISABLE_COPY_AND_ASSIGN (gdbpy_gil);
++
++private:
++
++  PyGILState_STATE m_state;
++};
++
+ /* Set the quit flag.  */
+ 
+ static void
+@@ -255,6 +279,10 @@ gdbpy_set_quit_flag (const struct extension_language_defn *extlang)
+ static int
+ gdbpy_check_quit_flag (const struct extension_language_defn *extlang)
+ {
++  if (!gdb_python_initialized)
++    return 0;
++
++  gdbpy_gil gil;
+   return PyOS_InterruptOccurred ();
+ }
+ 
+@@ -1653,6 +1681,7 @@ finalize_python (void *ignore)
+ 
+   Py_Finalize ();
+ 
++  gdb_python_initialized = false;
+   restore_active_ext_lang (previous_active);
+ }
+ 
+@@ -1813,8 +1842,7 @@ do_start_initialization ()
+     return false;
+ 
+   /* Release the GIL while gdb runs.  */
+-  PyThreadState_Swap (NULL);
+-  PyEval_ReleaseLock ();
++  PyEval_SaveThread ();
+ 
+   make_final_cleanup (finalize_python, NULL);
+ 
+-- 
+2.30.2
+

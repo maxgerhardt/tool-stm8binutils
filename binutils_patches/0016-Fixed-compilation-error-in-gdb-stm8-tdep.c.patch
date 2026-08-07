@@ -1,0 +1,25 @@
+From 94e4bc3b71b25b551fa40b791bbbdc21bc6718c5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C3=85ke=20Rehnman?= <ake_rehnman_at_gmail_com>
+Date: Sun, 22 Mar 2020 11:37:28 +0100
+Subject: [PATCH 16/18] Fixed compilation error in gdb/stm8-tdep.c
+
+---
+ gdb/stm8-tdep.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gdb/stm8-tdep.c b/gdb/stm8-tdep.c
+index 99276d5cf8..bc490f63f7 100644
+--- a/gdb/stm8-tdep.c
++++ b/gdb/stm8-tdep.c
+@@ -416,7 +416,7 @@ stm8_dwarf2_reg_to_regnum (struct gdbarch *gdbarch, int reg)
+   if ((stm8_debug>1) && (ret>=0))
+ 	fprintf_unfiltered (gdb_stdlog, "stm8_dwarf2_reg_to_regnum called reg=%d ret=%d\n",reg,t[reg]);
+ 
+-	return ret;
++  return ret;
+ }
+ 
+ static void
+-- 
+2.30.2
+
