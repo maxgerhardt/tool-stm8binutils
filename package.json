@@ -1,0 +1,24 @@
+{
+  "name": "tool-stm8binutils",
+  "version": "0.230.0",
+  "description": "STM8 toolchain with GDB debugger",
+  "keywords": [
+    "toolchain",
+    "build tools",
+    "compiler",
+    "assembler",
+    "linker",
+    "preprocessor",
+    "stmicroelectronics",
+    "stm8"
+  ],
+  "homepage": "https://stm8-binutils-gdb.sourceforge.io/",
+  "license": "GPL-3.0-or-later",
+  "system": [
+    "linux_aarch64"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://git.code.sf.net/p/stm8-binutils-gdb/code"
+  }
+}
