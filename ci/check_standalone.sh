@@ -24,6 +24,15 @@ case "$(uname -s)" in
     offenders=$(otool -L "$BIN" | tail -n +2 | awk '{print $1}' \
       | grep -v '^/usr/lib/' | grep -v '^/System/Library/' || true)
     ;;
+  MINGW*|MSYS*|CYGWIN*)
+    # Note: the system objdump, not the freshly built stm8-objdump - that one
+    # is a cross tool that only understands stm8 ELF and cannot read PE at all.
+    objdump -p "$BIN" | grep -i 'DLL Name' | sort -u
+    # Windows' own DLLs are fine; anything MSYS2 supplied is not. Those are
+    # named libfoo-N.dll, msys-2.0.dll or zlib1.dll, none of which a user has.
+    offenders=$(objdump -p "$BIN" | grep -i 'DLL Name' | awk '{print $3}' \
+      | grep -iE '^(msys-|lib|zlib)' || true)
+    ;;
   *)
     ldd "$BIN"
     # glibc's own pieces, and nothing else.

@@ -16,17 +16,15 @@
 set -e
 
 SRCDIR="binutils-${BINUTILS_VERSION:-2.30}"
-WORK="$(pwd)"
+NEW_GUESS="$(cd "$(dirname "$0")" && pwd)/config.guess"
 
-echo "==> Refreshing config.guess"
-curl -fsSL --retry 3 -o "${WORK}/config.guess.new" \
-  "https://git.savannah.gnu.org/cgit/config.git/plain/config.guess"
+# config.guess is vendored rather than downloaded. The savannah endpoint
+# intermittently 404s under CI load, and a build that only sometimes finds its
+# own toolchain is worse than one pinned to a known-good copy.
+[ -f "$NEW_GUESS" ] || { echo "missing vendored ${NEW_GUESS}" >&2; exit 1; }
 
-# Sanity check - an error page would otherwise be copied over dozens of files.
-head -1 "${WORK}/config.guess.new" | grep -q '^#!' || {
-  echo "downloaded config.guess is not a script" >&2; exit 1; }
-
-find "$SRCDIR" -name config.guess -exec cp "${WORK}/config.guess.new" {} \; -exec chmod +x {} \;
+echo "==> Installing vendored config.guess"
+find "$SRCDIR" -name config.guess -exec cp "$NEW_GUESS" {} \; -exec chmod +x {} \;
 
 echo "==> Host now detected as: $(sh "${SRCDIR}/config.guess")"
 echo "==> Target still resolves: $(sh "${SRCDIR}/config.sub" stm8-none-elf32)"

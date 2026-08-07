@@ -55,11 +55,17 @@ jobs:
         env:
           SEARCH_DIRS: /usr/lib/x86_64-linux-gnu /usr/lib
         run: |
-          # Both ncurses and ncursesw are staged: gdb's link line asks for
-          # -lncurses, and leaving that one out let libncurses.so back in and
-          # dragged libtinfo.so along behind it.
-          ./ci/stage_static_libs.sh "$(pwd)/staticlibs" \
+          STATICLIBS="$(pwd)/staticlibs"
+          ./ci/stage_static_libs.sh "$STATICLIBS" \
             readline history ncurses ncursesw tinfo expat lzma z
+          # gdb's configure settles on -lcurses, and Debian ships no
+          # libcurses.a - only a libcurses.so symlink, which is how
+          # libncurses.so.6 kept reappearing. Debian also splits terminfo out
+          # into libtinfo, so a static libcurses.a has to carry both halves or
+          # the link leaves tgetent and friends undefined.
+          printf 'CREATE %s/libcurses.a\nADDLIB %s/libncurses.a\nADDLIB %s/libtinfo.a\nSAVE\nEND\n' \
+            "$STATICLIBS" "$STATICLIBS" "$STATICLIBS" | ar -M
+          ar t "$STATICLIBS/libcurses.a" | wc -l | xargs echo "libcurses.a members:"
 
       - name: Configure
         run: |
@@ -172,9 +178,7 @@ jobs:
           ./installed/bin/stm8-gdb.exe --version
           ./installed/bin/stm8-as.exe --version
           ./installed/bin/stm8-ld.exe --version
-          echo "--- stm8-gdb.exe imports (should list no msys / mingw DLLs) ---"
-          ./installed/bin/stm8-objdump.exe -p ./installed/bin/stm8-gdb.exe \
-            | grep -i 'DLL Name' | sort -u
+          ./ci/check_standalone.sh ./installed/bin/stm8-gdb.exe
 
       - name: Write package.json
         run: ./ci/make_package_json.sh windows_amd64 installed
