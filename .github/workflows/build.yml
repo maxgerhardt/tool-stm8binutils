@@ -321,3 +321,172 @@ jobs:
             binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
             for ${{ matrix.system }} (${{ github.sha }})
         run: ./ci/publish_branch.sh ${{ matrix.branch }} installed
+
+  linux-armv7l:
+    name: Linux armv7l
+    runs-on: ubuntu-latest
+    # debian:11 rather than the ubuntu-22.04 runner so the armhf libraries come
+    # from bullseye and the result needs only glibc 2.31 - matching the armv6
+    # build, and covering Raspberry Pi OS bullseye, which a large share of
+    # deployed Pis still run. Building on the runner directly would demand 2.35.
+    container: debian:11
+    env:
+      CROSS_HOST: arm-linux-gnueabihf
+    steps:
+      - name: Install build dependencies
+        run: |
+          dpkg --add-architecture armhf
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential crossbuild-essential-armhf qemu-user-static \
+            texinfo bison flex file patch curl xz-utils ca-certificates git make \
+            libreadline-dev:armhf libexpat1-dev:armhf zlib1g-dev:armhf \
+            libncurses-dev:armhf liblzma-dev:armhf
+          git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@v4
+
+      - name: Download and patch sources
+        run: ./ci/fetch_sources.sh
+
+      - name: Stage static dependency archives
+        run: |
+          export SEARCH_DIRS="/usr/lib/${CROSS_HOST}"
+          STATICLIBS="$(pwd)/staticlibs"
+          ./ci/stage_static_libs.sh "$STATICLIBS" \
+            readline history ncurses ncursesw tinfo expat lzma z
+          # Same -lcurses problem as the native Linux build, and the cross ar so
+          # the archive index is written for the target architecture.
+          printf 'CREATE %s/libcurses.a\nADDLIB %s/libncurses.a\nADDLIB %s/libtinfo.a\nSAVE\nEND\n' \
+            "$STATICLIBS" "$STATICLIBS" "$STATICLIBS" | "${CROSS_HOST}-ar" -M
+          "${CROSS_HOST}-ar" t "$STATICLIBS/libcurses.a" | wc -l \
+            | xargs echo "libcurses.a members:"
+
+      - name: Configure
+        run: |
+          PREFIX="$(pwd)/installed"
+          STATICLIBS="$(pwd)/staticlibs"
+          cd "binutils-${BINUTILS_VERSION}"
+          ./configure \
+            --build=x86_64-pc-linux-gnu \
+            --host="${CROSS_HOST}" \
+            --prefix="$PREFIX" \
+            $COMMON_CONFIGURE_FLAGS \
+            LDFLAGS="-L${STATICLIBS}"
+
+      - name: Build
+        run: make -C "binutils-${BINUTILS_VERSION}" -j"$(nproc)"
+
+      - name: Install
+        run: make -C "binutils-${BINUTILS_VERSION}" install
+
+      - name: Strip binaries
+        env:
+          STRIP: arm-linux-gnueabihf-strip
+        run: ./ci/strip_tree.sh installed
+
+      - name: Smoke test
+        run: |
+          echo "--- architecture ---"
+          file ./installed/bin/stm8-gdb
+          # The binaries are armv7 and the host is x86_64, so run them under
+          # qemu. The armhf multiarch loader and libraries are already present.
+          qemu-arm-static ./installed/bin/stm8-gdb --version
+          qemu-arm-static ./installed/bin/stm8-as --version
+          qemu-arm-static ./installed/bin/stm8-ld --version
+          ./ci/check_standalone.sh ./installed/bin/stm8-gdb
+          echo "--- highest glibc symbol version required ---"
+          objdump -T ./installed/bin/stm8-gdb \
+            | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+
+      - name: Write package.json
+        run: ./ci/make_package_json.sh linux_armv7l installed
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tool-stm8binutils-linux_armv7l
+          path: installed/
+
+      - name: Publish to linux_armv7l branch
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MESSAGE: >-
+            binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
+            for linux_armv7l (${{ github.sha }})
+        run: ./ci/publish_branch.sh linux_armv7l installed
+
+  linux-armv6l:
+    name: Linux armv6l
+    runs-on: ubuntu-22.04
+    # Emulated, so far slower than every other job here. ARMv6 has no native
+    # runner and Debian/Ubuntu armhf is ARMv7-baseline, which would not run on a
+    # Pi 1 or Zero at all - Raspberry Pi OS 32-bit is the only practical source
+    # of genuine ARMv6 libraries.
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build inside emulated Raspberry Pi OS
+        uses: pguyot/arm-runner-action@v2
+        with:
+          # 2021-10-30 is the first bullseye release: glibc 2.31.
+          base_image: raspios_lite:2021-10-30
+          cpu: arm1176
+          image_additional_mb: 8000
+          copy_artifact_path: installed
+          commands: |
+            set -e
+            # These are interpolated into the script before it enters the image.
+            # If that ever stops working the flags would silently vanish and we
+            # would build a host-targeted gdb, so check rather than assume.
+            CONFIGURE_FLAGS="${{ env.COMMON_CONFIGURE_FLAGS }}"
+            case "$CONFIGURE_FLAGS" in
+              *--target=stm8-none-elf32*) ;;
+              *) echo "configure flags failed to expand: '$CONFIGURE_FLAGS'" >&2; exit 1 ;;
+            esac
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              build-essential texinfo bison flex file patch curl xz-utils \
+              ca-certificates binutils \
+              libreadline-dev libexpat1-dev zlib1g-dev libncurses-dev liblzma-dev
+            ./ci/fetch_sources.sh
+            export SEARCH_DIRS="/usr/lib/arm-linux-gnueabihf /usr/lib"
+            STATICLIBS="$(pwd)/staticlibs"
+            ./ci/stage_static_libs.sh "$STATICLIBS" \
+              readline history ncurses ncursesw tinfo expat lzma z
+            printf 'CREATE %s/libcurses.a\nADDLIB %s/libncurses.a\nADDLIB %s/libtinfo.a\nSAVE\nEND\n' \
+              "$STATICLIBS" "$STATICLIBS" "$STATICLIBS" | ar -M
+            PREFIX="$(pwd)/installed"
+            cd "binutils-${{ env.BINUTILS_VERSION }}"
+            ./configure --prefix="$PREFIX" $CONFIGURE_FLAGS \
+              LDFLAGS="-L$STATICLIBS"
+            make -j"$(nproc)"
+            make install
+            cd ..
+            ./ci/strip_tree.sh installed
+            ./installed/bin/stm8-gdb --version
+            ./installed/bin/stm8-as --version
+            ./ci/check_standalone.sh ./installed/bin/stm8-gdb
+
+      - name: Write package.json
+        run: ./ci/make_package_json.sh linux_armv6l installed
+
+      - name: Verify architecture
+        run: |
+          file ./installed/bin/stm8-gdb
+          readelf -A ./installed/bin/stm8-gdb | grep -iE 'Tag_CPU_(name|arch)' || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tool-stm8binutils-linux_armv6l
+          path: installed/
+
+      - name: Publish to linux_armv6l branch
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MESSAGE: >-
+            binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
+            for linux_armv6l (${{ github.sha }})
+        run: ./ci/publish_branch.sh linux_armv6l installed
