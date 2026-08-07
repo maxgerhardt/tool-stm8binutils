@@ -3,5 +3,6 @@
 
 # The CI runs these through /bin/sh, so CRLF would break them.
 *.sh text eol=lf
+ci/config.guess text eol=lf
 *.yml text eol=lf
 package.json.in text eol=lf
