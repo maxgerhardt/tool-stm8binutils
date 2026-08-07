@@ -36,12 +36,15 @@ case "$(uname -s)" in
   *)
     # readelf rather than ldd: ldd only works on binaries the host can run,
     # and the arm cross builds are inspected from an x86_64 host. readelf reads
-    # any ELF regardless of its architecture. The interpreter and vdso are not
-    # DT_NEEDED entries, so they drop out of this list on their own.
+    # any ELF regardless of its architecture.
     "${READELF:-readelf}" -d "$BIN" | grep NEEDED || true
+    # glibc's own pieces, and nothing else. ld-linux-* is the dynamic loader:
+    # it does show up as a DT_NEEDED entry and is exactly as guaranteed to be
+    # present as libc itself. Its name is architecture specific -
+    # ld-linux-x86-64.so.2, ld-linux-aarch64.so.1, ld-linux-armhf.so.3.
     offenders=$("${READELF:-readelf}" -d "$BIN" \
       | sed -n 's/.*NEEDED.*\[\(.*\)\].*/\1/p' \
-      | grep -Ev '^(libm\.so\.6|libc\.so\.6|libdl\.so\.2|libpthread\.so\.0|librt\.so\.1|libgcc_s\.so\.1)$' || true)
+      | grep -Ev '^(libm\.so\.6|libc\.so\.6|libdl\.so\.2|libpthread\.so\.0|librt\.so\.1|libgcc_s\.so\.1|ld-linux.*\.so\.[0-9]+|ld\.so\.[0-9]+|ld64\.so\.[0-9]+)$' || true)
     ;;
 esac
 

@@ -277,10 +277,16 @@ jobs:
           export LDFLAGS="-L${STATICLIBS}"
           export PATH="${BREW}/opt/texinfo/bin:$PATH"
           cd "binutils-${BINUTILS_VERSION}"
+          # --with-system-zlib: the bundled zlib's zutil.h does
+          #   #define fdopen(fd,mode) NULL
+          # under TARGET_OS_MAC, which Apple's headers define, and that macro
+          # then mangles the SDK's own fdopen declaration. macOS ships libz in
+          # /usr/lib, so use it and skip the 1990s copy entirely.
           ./configure \
             --build=${{ matrix.host }} \
             --host=${{ matrix.host }} \
             --prefix="$PREFIX" \
+            --with-system-zlib \
             $COMMON_CONFIGURE_FLAGS
 
       - name: Build
