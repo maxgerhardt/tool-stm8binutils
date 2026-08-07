@@ -7,6 +7,10 @@ set -e
 
 ROOT=${1:-installed}
 
+# STRIP is overridable so the arm cross builds can use their own
+# arm-linux-gnueabihf-strip; the host strip cannot touch a foreign-arch ELF.
+STRIP_CMD=${STRIP:-strip}
+
 case "$(uname -s)" in
   Darwin)
     # Plain `strip` mangles Mach-O executables; -S -x drops debug info and
@@ -25,7 +29,7 @@ echo "Install tree before stripping: $(du -sh "$ROOT" | cut -f1)"
 find "$ROOT" -type f -print | while IFS= read -r f; do
   case "$(file -b "$f" 2>/dev/null)" in
     *ELF*executable*|*ELF*shared\ object*|*PE32*executable*|*PE32*DLL*|*Mach-O*)
-      strip $STRIP_ARGS "$f" 2>/dev/null || continue
+      $STRIP_CMD $STRIP_ARGS "$f" 2>/dev/null || continue
       if [ "$RESIGN" = 1 ]; then
         # Stripping invalidates the ad-hoc signature every arm64 Mach-O carries,
         # and an invalidated signature means the kernel SIGKILLs the process on

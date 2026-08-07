@@ -34,10 +34,14 @@ case "$(uname -s)" in
       | grep -iE '^(msys-|lib|zlib)' || true)
     ;;
   *)
-    ldd "$BIN"
-    # glibc's own pieces, and nothing else.
-    offenders=$(ldd "$BIN" | awk '{print $1}' \
-      | grep -Ev '^(linux-vdso\.so\.1|libm\.so\.6|libc\.so\.6|libdl\.so\.2|libpthread\.so\.0|librt\.so\.1|libgcc_s\.so\.1|/lib64/ld-linux-x86-64\.so\.2)$' || true)
+    # readelf rather than ldd: ldd only works on binaries the host can run,
+    # and the arm cross builds are inspected from an x86_64 host. readelf reads
+    # any ELF regardless of its architecture. The interpreter and vdso are not
+    # DT_NEEDED entries, so they drop out of this list on their own.
+    "${READELF:-readelf}" -d "$BIN" | grep NEEDED || true
+    offenders=$("${READELF:-readelf}" -d "$BIN" \
+      | sed -n 's/.*NEEDED.*\[\(.*\)\].*/\1/p' \
+      | grep -Ev '^(libm\.so\.6|libc\.so\.6|libdl\.so\.2|libpthread\.so\.0|librt\.so\.1|libgcc_s\.so\.1)$' || true)
     ;;
 esac
 

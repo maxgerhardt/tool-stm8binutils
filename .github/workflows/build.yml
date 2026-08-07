@@ -36,8 +36,20 @@ env:
 
 jobs:
   linux:
-    name: Linux x86_64
-    runs-on: ubuntu-22.04
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+            system: linux_x86_64
+            branch: linux_x64
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+            system: linux_aarch64
+            branch: linux_aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -52,9 +64,10 @@ jobs:
         run: ./ci/fetch_sources.sh
 
       - name: Stage static dependency archives
-        env:
-          SEARCH_DIRS: /usr/lib/x86_64-linux-gnu /usr/lib
         run: |
+          # gcc -dumpmachine resolves to x86_64-linux-gnu or aarch64-linux-gnu,
+          # so the same step serves both runners.
+          export SEARCH_DIRS="/usr/lib/$(gcc -dumpmachine) /usr/lib"
           STATICLIBS="$(pwd)/staticlibs"
           ./ci/stage_static_libs.sh "$STATICLIBS" \
             readline history ncurses ncursesw tinfo expat lzma z
@@ -98,21 +111,21 @@ jobs:
             | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
 
       - name: Write package.json
-        run: ./ci/make_package_json.sh linux_x86_64 installed
+        run: ./ci/make_package_json.sh ${{ matrix.system }} installed
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tool-stm8binutils-linux_x86_64
+          name: tool-stm8binutils-${{ matrix.system }}
           path: installed/
 
-      - name: Publish to linux_x64 branch
+      - name: Publish to ${{ matrix.branch }} branch
         if: github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_MESSAGE: >-
             binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
-            for linux_x86_64 (${{ github.sha }})
-        run: ./ci/publish_branch.sh linux_x64 installed
+            for ${{ matrix.system }} (${{ github.sha }})
+        run: ./ci/publish_branch.sh ${{ matrix.branch }} installed
 
   windows:
     name: Windows x86_64
@@ -198,8 +211,29 @@ jobs:
         run: ./ci/publish_branch.sh windows_x64 installed
 
   macos:
-    name: macOS arm64
-    runs-on: macos-14
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      # Without this the binaries are tagged with the runner's own OS version
+      # and refuse to launch on anything older. 11.0 is the first macOS that
+      # ran on Apple Silicon; 10.13 covers essentially every living Intel Mac.
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+            host: aarch64-apple-darwin
+            system: darwin_arm64
+            branch: mac_arm64
+            deployment_target: "11.0"
+          - arch: x86_64
+            runner: macos-15-intel
+            host: x86_64-apple-darwin
+            system: darwin_x86_64
+            branch: mac_x64
+            deployment_target: "10.13"
     steps:
       - uses: actions/checkout@v4
 
@@ -209,7 +243,9 @@ jobs:
       - name: Download and patch sources
         run: ./ci/fetch_sources.sh
 
-      - name: Prepare sources for Apple Silicon
+      # Both architectures need this: the intl/VERSION removal is about the
+      # case-insensitive filesystem, which is not specific to Apple Silicon.
+      - name: Prepare sources for macOS
         run: ./ci/macos_prep.sh
 
       - name: Stage static dependency archives
@@ -242,8 +278,8 @@ jobs:
           export PATH="${BREW}/opt/texinfo/bin:$PATH"
           cd "binutils-${BINUTILS_VERSION}"
           ./configure \
-            --build=aarch64-apple-darwin \
-            --host=aarch64-apple-darwin \
+            --build=${{ matrix.host }} \
+            --host=${{ matrix.host }} \
             --prefix="$PREFIX" \
             $COMMON_CONFIGURE_FLAGS
 
@@ -270,18 +306,18 @@ jobs:
           codesign -dv ./installed/bin/stm8-gdb
 
       - name: Write package.json
-        run: ./ci/make_package_json.sh darwin_arm64 installed
+        run: ./ci/make_package_json.sh ${{ matrix.system }} installed
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tool-stm8binutils-darwin_arm64
+          name: tool-stm8binutils-${{ matrix.system }}
           path: installed/
 
-      - name: Publish to mac_arm64 branch
+      - name: Publish to ${{ matrix.branch }} branch
         if: github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_MESSAGE: >-
             binutils ${{ env.BINUTILS_VERSION }} + gdb ${{ env.GDB_VERSION }}
-            for darwin_arm64 (${{ github.sha }})
-        run: ./ci/publish_branch.sh mac_arm64 installed
+            for ${{ matrix.system }} (${{ github.sha }})
+        run: ./ci/publish_branch.sh ${{ matrix.branch }} installed
